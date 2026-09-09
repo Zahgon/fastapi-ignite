@@ -1,36 +1,35 @@
 """
-API v1 router configuration
+API v1 router
 """
-from fastapi import APIRouter
+from flask import Blueprint, Response
+
+from src.api.responses import json_response
+from src.api.v1.endpoints import items
 from src.core.config import settings
 
-from src.api.v1.endpoints import items
 
-# Create the v1 router
-router = APIRouter()
+router = Blueprint("v1", __name__)
 
-# Include all endpoint routers
-router.include_router(items.router)
+router.register_blueprint(items.router)
 
-# Add health check endpoint directly to v1 router
-@router.get("/health", tags=["health"])
-async def health_check():
+
+@router.get("/health")
+def health_check() -> Response:
     """
     Health check endpoint
-    
-    Returns a simple message to confirm the API is running
     """
-    return {"status": "ok", "version": "1"}
+    return json_response({"status": "ok", "version": "1"})
 
-@router.get("/app-info", tags=["info"])
-async def app_info():
+
+@router.get("/app-info")
+def app_info() -> Response:
     """
     Application information endpoint
-    
-    Returns basic information about the application
     """
-    return {
-        "name": settings.PROJECT_NAME,
-        "description": settings.PROJECT_DESCRIPTION,
-        "version": settings.VERSION
-    }
+    return json_response(
+        {
+            "name": settings.PROJECT_NAME,
+            "description": settings.PROJECT_DESCRIPTION,
+            "version": settings.VERSION,
+        }
+    )

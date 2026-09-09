@@ -18,6 +18,19 @@ logger = logging.getLogger(__name__)
 engine: AsyncEngine = None
 async_session_factory: async_sessionmaker = None
 
+# Optional replacement factory, used by the test suite to bind sessions to its own
+# connection instead of the application engine
+session_factory_override: async_sessionmaker = None
+
+
+def set_session_factory_override(factory: async_sessionmaker) -> None:
+    """
+    Install (or, with ``None``, remove) a replacement session factory
+    """
+    global session_factory_override
+
+    session_factory_override = factory
+
 
 async def create_db_engine() -> None:
     """
@@ -52,12 +65,14 @@ async def dispose_db_engine() -> None:
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    FastAPI dependency that provides a database session
+    Provide a database session for the duration of a request
     """
-    if async_session_factory is None:
+    if session_factory_override is None and async_session_factory is None:
         await create_db_engine()
-        
-    async with async_session_factory() as session:
+
+    factory = session_factory_override or async_session_factory
+
+    async with factory() as session:
         try:
             yield session
             await session.commit()

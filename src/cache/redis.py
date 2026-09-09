@@ -46,7 +46,7 @@ async def get_redis() -> Redis:
     """
     Get Redis client from pool
     
-    Can be used as a FastAPI dependency
+    Can be used to acquire a client inside a request
     """
     global redis_pool
     

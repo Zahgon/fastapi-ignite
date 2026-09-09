@@ -25,7 +25,7 @@ def setup_logging() -> None:
     )
     
     # Set log level for third-party libraries
-    for logger_name in ["uvicorn", "uvicorn.error", "fastapi"]:
+    for logger_name in ["werkzeug", "gunicorn.error", "flask"]:
         logging.getLogger(logger_name).setLevel(log_level)
         
     # Configure structlog processors for development vs. production

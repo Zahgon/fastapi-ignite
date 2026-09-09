@@ -12,19 +12,18 @@ logger = logging.getLogger(__name__)
 
 async def get_cache() -> AsyncGenerator[CacheBackend, None]:
     """
-    Get cache client instance as a FastAPI dependency
+    Get cache client instance as a request-scoped dependency
     
     This function is a dependency provider that yields a cache backend
-    instance for use in FastAPI endpoints.
+    instance for use in view functions.
     
     Usage:
-        @router.get("/items/{item_id}")
-        async def get_item(
-            item_id: int, 
-            cache: CacheBackend = Depends(get_cache)
-        ):
+        @router.get("/items/<item_id>")
+        def get_item(item_id):
+            generator = get_cache()
+            cache = run_async(generator.__anext__())
             # Use the cache instance
-            value = await cache.get(f"item:{item_id}")
+            value = run_async(cache.get(f"item:{item_id}"))
             ...
     
     Returns:

@@ -1,218 +1,236 @@
 """
 API endpoints for Item resources
 """
-import json
+import logging
 import uuid
-from typing import List, Optional
+from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from flask import Blueprint, Response, request
+from pydantic import Field, TypeAdapter
+from typing_extensions import Annotated
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_db_session
+from src.api.deps import db_session
+from src.api.responses import (
+    empty_response, json_response, model_list_response, model_response
+)
+from src.api.validation import (
+    validate_body, validate_path_param, validate_query_params
+)
 from src.cache import CacheBackend, cached, get_cache
+from src.core.aio import run_async
 from src.core.config import settings
+from src.core.exceptions import HTTPException
 from src.schemas.item import ItemCreate, ItemResponse, ItemUpdate
-from src.services.item_service import ItemService
 from src.services.cached_item_service import CachedItemService
-
-# Create router with prefix and tags
-router = APIRouter(
-    prefix="/items",
-    tags=["items"],
-)
+from src.services.item_service import ItemService
 
 
-@router.post(
-    "/",
-    response_model=ItemResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create a new item",
-    description="Create a new item with the provided information",
-)
-async def create_item(
-    item_data: ItemCreate, 
-    db: AsyncSession = Depends(get_db_session),
-) -> ItemResponse:
+logger = logging.getLogger(__name__)
+
+router = Blueprint("items", __name__, url_prefix="/items")
+
+_ITEM_ID = TypeAdapter(uuid.UUID)
+_SKIP = TypeAdapter(Annotated[int, Field(ge=0)])
+_LIMIT = TypeAdapter(Annotated[int, Field(ge=1, le=100)])
+_ACTIVE_ONLY = TypeAdapter(bool)
+_SEARCH_TERM = TypeAdapter(Annotated[str, Field(min_length=1)])
+
+
+def _cache_backend() -> CacheBackend:
+    generator = get_cache()
+    return run_async(generator.__anext__())
+
+
+@router.post("/")
+def create_item() -> Response:
     """
     Create a new item
     """
-    item = await ItemService.create_item(db, item_data)
-    return item
-
-
-@router.get(
-    "/{item_id}",
-    response_model=ItemResponse,
-    summary="Get item by ID",
-    description="Get detailed information about a specific item by its ID",
-)
-@cached(ttl=settings.CACHE_TTL_SECONDS, key_prefix="item")
-async def get_item(
-    item_id: uuid.UUID, 
-    db: AsyncSession = Depends(get_db_session),
-) -> ItemResponse:
-    """
-    Get an item by ID with caching
-    """
-    item = await ItemService.get_item(db, item_id)
-    return item
-
-
-@router.get(
-    "/",
-    response_model=List[ItemResponse],
-    summary="List items",
-    description="Get a list of items with optional pagination and filtering",
-)
-@cached(ttl=60, key_builder=lambda *args, **kwargs: f"items:{kwargs.get('active_only')}:{kwargs.get('skip')}:{kwargs.get('limit')}")
-async def list_items(
-    skip: int = Query(0, ge=0, description="Number of items to skip"),
-    limit: int = Query(100, ge=1, le=100, description="Max number of items to return"),
-    active_only: bool = Query(False, description="Only return active items"),
-    db: AsyncSession = Depends(get_db_session),
-) -> List[ItemResponse]:
-    """
-    Get multiple items with pagination and optional filtering
-    """
-    items = await ItemService.get_items(
-        db=db, skip=skip, limit=limit, active_only=active_only
+    item_data = validate_body(
+        ItemCreate, request.get_data(), request.headers.get("Content-Type")
     )
-    return items
+
+    with db_session() as db:
+        item = run_async(ItemService.create_item(db, item_data))
+        return model_response(ItemResponse, item, status=201)
 
 
-@router.put(
-    "/{item_id}",
-    response_model=ItemResponse,
-    summary="Update item",
-    description="Update an existing item's information",
+@cached(ttl=settings.CACHE_TTL_SECONDS, key_prefix="item")
+async def _read_item(item_id: uuid.UUID, db: AsyncSession) -> Any:
+    return await ItemService.get_item(db, item_id)
+
+
+@router.get("/<item_id>")
+def get_item(item_id: str) -> Response:
+    """
+    Get an item by ID
+    """
+    parsed_id = validate_path_param("item_id", _ITEM_ID, item_id)
+
+    with db_session() as db:
+        item = run_async(_read_item(item_id=parsed_id, db=db))
+        return model_response(ItemResponse, item)
+
+
+@cached(
+    ttl=60,
+    key_builder=lambda *args, **kwargs: (
+        f"items:{kwargs.get('active_only')}:{kwargs.get('skip')}:{kwargs.get('limit')}"
+    ),
 )
-async def update_item(
-    item_id: uuid.UUID,
-    item_data: ItemUpdate,
-    db: AsyncSession = Depends(get_db_session),
-) -> ItemResponse:
+async def _read_items(
+    skip: int, limit: int, active_only: bool, db: AsyncSession
+) -> Any:
+    return await ItemService.get_items(
+        db, skip=skip, limit=limit, active_only=active_only
+    )
+
+
+@router.get("/")
+def list_items() -> Response:
+    """
+    List items with pagination
+    """
+    params = validate_query_params(
+        request.args,
+        (
+            ("skip", _SKIP, False, 0),
+            ("limit", _LIMIT, False, 100),
+            ("active_only", _ACTIVE_ONLY, False, False),
+        ),
+    )
+
+    with db_session() as db:
+        items = run_async(
+            _read_items(
+                skip=params["skip"],
+                limit=params["limit"],
+                active_only=params["active_only"],
+                db=db,
+            )
+        )
+        return model_list_response(ItemResponse, items)
+
+
+@router.put("/<item_id>")
+def update_item(item_id: str) -> Response:
     """
     Update an item
     """
-    updated_item = await ItemService.update_item(db, item_id, item_data)
-    return updated_item
+    parsed_id = validate_path_param("item_id", _ITEM_ID, item_id)
+    item_data = validate_body(
+        ItemUpdate, request.get_data(), request.headers.get("Content-Type")
+    )
+
+    with db_session() as db:
+        item = run_async(ItemService.update_item(db, parsed_id, item_data))
+        return model_response(ItemResponse, item)
 
 
-@router.delete(
-    "/{item_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete item",
-    description="Delete an existing item",
-)
-async def delete_item(
-    item_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db_session),
-) -> None:
+@router.delete("/<item_id>")
+def delete_item(item_id: str) -> Response:
     """
     Delete an item
     """
-    await ItemService.delete_item(db, item_id)
+    parsed_id = validate_path_param("item_id", _ITEM_ID, item_id)
+
+    with db_session() as db:
+        run_async(ItemService.delete_item(db, parsed_id))
+        return empty_response(204)
 
 
-@router.get(
-    "/search/",
-    response_model=List[ItemResponse],
-    summary="Search items",
-    description="Search for items by term in name or description",
-)
-async def search_items(
-    q: str = Query(..., min_length=1, description="Search term"),
-    skip: int = Query(0, ge=0, description="Number of items to skip"),
-    limit: int = Query(100, ge=1, le=100, description="Max number of items to return"),
-    db: AsyncSession = Depends(get_db_session),
-) -> List[ItemResponse]:
+@router.get("/search/")
+def search_items() -> Response:
     """
-    Search for items
+    Search for items by name or description
     """
-    items = await ItemService.search_items(
-        db=db, search_term=q, skip=skip, limit=limit
+    params = validate_query_params(
+        request.args,
+        (
+            ("q", _SEARCH_TERM, True, None),
+            ("skip", _SKIP, False, 0),
+            ("limit", _LIMIT, False, 100),
+        ),
     )
-    return items
 
-
-@router.get(
-    "/cached/{item_id}",
-    response_model=ItemResponse,
-    summary="Get item by ID (using direct cache)",
-    description="Get item details using the cache backend directly",
-)
-async def get_cached_item(
-    item_id: uuid.UUID, 
-    db: AsyncSession = Depends(get_db_session),
-    cache: CacheBackend = Depends(get_cache),
-) -> ItemResponse:
-    """
-    Get an item by ID using the cache backend directly
-    
-    This endpoint demonstrates how to use the cache backend directly in an endpoint.
-    The current cache backend in use is determined by CACHE_BACKEND_TYPE setting.
-    """
-    # Get item using the direct cache method
-    item_data = await CachedItemService.direct_cache_example(db, cache, item_id)
-    
-    if not item_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Item with ID {item_id} not found",
+    with db_session() as db:
+        items = run_async(
+            ItemService.search_items(
+                db,
+                search_term=params["q"],
+                skip=params["skip"],
+                limit=params["limit"],
+            )
         )
-        
-    return item_data
+        return model_list_response(ItemResponse, items)
 
 
-@router.get(
-    "/cache/clear",
-    summary="Clear item cache",
-    description="Clear all cached items to test cache invalidation",
-)
-async def clear_item_cache(
-    cache: CacheBackend = Depends(get_cache),
-) -> dict:
+@router.get("/cached/<item_id>")
+def get_cached_item(item_id: str) -> Response:
     """
-    Clear all item cache entries
-    
-    This endpoint demonstrates how to manually invalidate cache entries
-    by scanning for keys with a pattern and deleting them.
+    Get an item using the direct cache access pattern
     """
-    # Scan for all item cache keys
+    parsed_id = validate_path_param("item_id", _ITEM_ID, item_id)
+    cache = _cache_backend()
+
+    with db_session() as db:
+        item_data = run_async(
+            CachedItemService.direct_cache_example(db, cache, parsed_id)
+        )
+
+        if not item_data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Item with ID {parsed_id} not found",
+            )
+
+        return model_response(ItemResponse, item_data)
+
+
+@router.get("/cache/clear")
+def clear_item_cache() -> Response:
+    """
+    Clear all item-related cache entries
+    """
+    cache = _cache_backend()
+
     cursor = "0"
     deleted_keys = 0
-    
-    # Scan in batches
-    while cursor != "0" or deleted_keys == 0:  # Continue until we complete a full scan
-        cursor, keys = await cache.scan(cursor, "item:*", 100)
-        
+
+    while cursor != "0" or deleted_keys == 0:
+        cursor, keys = run_async(cache.scan(cursor, "item:*", 100))
+
         if keys:
-            # Delete found keys
-            count = await cache.delete(*keys)
-            deleted_keys += count
-            
-        # Exit if we've completed the scan
+            deleted_keys += run_async(cache.delete(*keys))
+
         if cursor == "0" and deleted_keys > 0:
             break
-            
-    return {"message": f"Successfully cleared {deleted_keys} cached items", "deleted_count": deleted_keys}
+
+    return json_response(
+        {
+            "message": f"Successfully cleared {deleted_keys} cached items",
+            "deleted_count": deleted_keys,
+        }
+    )
 
 
-@router.get(
-    "/cache/info",
-    summary="Get cache information",
-    description="Get information about the current cache configuration",
-)
-async def get_cache_info() -> dict:
+@router.get("/cache/info")
+def get_cache_info() -> Response:
     """
     Get information about the current cache configuration
-    
-    This endpoint returns details about which cache backend is currently active
-    and other relevant configuration.
     """
-    return {
-        "cache_backend_type": settings.CACHE_BACKEND_TYPE,
+    backend_type = settings.CACHE_BACKEND_TYPE
+
+    info: Dict[str, Any] = {
+        "cache_backend_type": backend_type,
         "cache_ttl_seconds": settings.CACHE_TTL_SECONDS,
-        "file_cache_path": settings.CACHE_FILE_PATH if settings.CACHE_BACKEND_TYPE == "file" else None,
-        "redis_uri": str(settings.REDIS_URI) if settings.CACHE_BACKEND_TYPE == "redis" else None,
+        "file_cache_path": (
+            settings.CACHE_FILE_PATH if backend_type == "file" else None
+        ),
+        "redis_uri": (
+            str(settings.REDIS_URI) if backend_type == "redis" else None
+        ),
     }
+
+    return json_response(info)

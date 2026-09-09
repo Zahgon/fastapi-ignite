@@ -21,7 +21,7 @@ def parse_args():
     Parse command-line arguments
     """
     parser = argparse.ArgumentParser(
-        description="FastAPI Boilerplate  command-line utilities",
+        description="Flask Boilerplate  command-line utilities",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     
@@ -69,18 +69,20 @@ def run_api(args):
     """
     Run the API server
     """
-    import uvicorn
-    
     # Set environment variable for scheduler if specified
     if args.scheduler_enabled is not None:
         os.environ["SCHEDULER_ENABLED"] = str(args.scheduler_enabled).lower()
     
-    uvicorn.run(
-        "main:app",
+    if args.reload:
+        os.environ["LOG_LEVEL"] = "DEBUG"
+    
+    from main import app
+    
+    app.run(
         host=args.host,
         port=args.port,
-        reload=args.reload,
-        log_level="debug" if args.reload else "info",
+        debug=args.reload,
+        use_reloader=args.reload,
     )
 
 

@@ -5,14 +5,14 @@ import uuid
 from typing import Dict
 
 import pytest
-from httpx import AsyncClient
+from flask.testing import FlaskClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models.item import Item
 
 
 @pytest.mark.asyncio
-async def test_create_item(client: AsyncClient, test_db: AsyncSession) -> None:
+async def test_create_item(client: FlaskClient, test_db: AsyncSession) -> None:
     """
     Test creating a new item through the API
     """
@@ -24,14 +24,14 @@ async def test_create_item(client: AsyncClient, test_db: AsyncSession) -> None:
     }
     
     # Send request
-    response = await client.post(
+    response = client.post(
         "/api/v1/items/",
         json=item_data
     )
     
     # Check response
     assert response.status_code == 201
-    data = response.json()
+    data = response.get_json()
     assert data["name"] == item_data["name"]
     assert data["description"] == item_data["description"]
     assert data["is_active"] == item_data["is_active"]
@@ -41,7 +41,7 @@ async def test_create_item(client: AsyncClient, test_db: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_item(client: AsyncClient, test_db: AsyncSession) -> None:
+async def test_read_item(client: FlaskClient, test_db: AsyncSession) -> None:
     """
     Test retrieving an item through the API
     """
@@ -52,18 +52,18 @@ async def test_read_item(client: AsyncClient, test_db: AsyncSession) -> None:
     await test_db.refresh(item)
     
     # Send request
-    response = await client.get(f"/api/v1/items/{item.id}")
+    response = client.get(f"/api/v1/items/{item.id}")
     
     # Check response
     assert response.status_code == 200
-    data = response.json()
+    data = response.get_json()
     assert data["name"] == "Test Get Item"
     assert data["description"] == "Item for testing get"
     assert data["id"] == str(item.id)
 
 
 @pytest.mark.asyncio
-async def test_read_nonexistent_item(client: AsyncClient) -> None:
+async def test_read_nonexistent_item(client: FlaskClient) -> None:
     """
     Test retrieving a non-existent item
     """
@@ -71,14 +71,14 @@ async def test_read_nonexistent_item(client: AsyncClient) -> None:
     nonexistent_id = uuid.uuid4()
     
     # Send request
-    response = await client.get(f"/api/v1/items/{nonexistent_id}")
+    response = client.get(f"/api/v1/items/{nonexistent_id}")
     
     # Check response
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_update_item(client: AsyncClient, test_db: AsyncSession) -> None:
+async def test_update_item(client: FlaskClient, test_db: AsyncSession) -> None:
     """
     Test updating an item through the API
     """
@@ -95,21 +95,21 @@ async def test_update_item(client: AsyncClient, test_db: AsyncSession) -> None:
     }
     
     # Send request
-    response = await client.put(
+    response = client.put(
         f"/api/v1/items/{item.id}",
         json=update_data
     )
     
     # Check response
     assert response.status_code == 200
-    data = response.json()
+    data = response.get_json()
     assert data["name"] == update_data["name"]
     assert data["description"] == update_data["description"]
     assert data["id"] == str(item.id)
 
 
 @pytest.mark.asyncio
-async def test_delete_item(client: AsyncClient, test_db: AsyncSession) -> None:
+async def test_delete_item(client: FlaskClient, test_db: AsyncSession) -> None:
     """
     Test deleting an item through the API
     """
@@ -120,18 +120,18 @@ async def test_delete_item(client: AsyncClient, test_db: AsyncSession) -> None:
     await test_db.refresh(item)
     
     # Send delete request
-    response = await client.delete(f"/api/v1/items/{item.id}")
+    response = client.delete(f"/api/v1/items/{item.id}")
     
     # Check response
     assert response.status_code == 204
     
     # Verify item is gone
-    check_response = await client.get(f"/api/v1/items/{item.id}")
+    check_response = client.get(f"/api/v1/items/{item.id}")
     assert check_response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_list_items(client: AsyncClient, test_db: AsyncSession) -> None:
+async def test_list_items(client: FlaskClient, test_db: AsyncSession) -> None:
     """
     Test listing items through the API
     """
@@ -148,17 +148,17 @@ async def test_list_items(client: AsyncClient, test_db: AsyncSession) -> None:
     await test_db.commit()
     
     # Send request for all items
-    response = await client.get("/api/v1/items/")
+    response = client.get("/api/v1/items/")
     
     # Check response
     assert response.status_code == 200
-    data = response.json()
+    data = response.get_json()
     assert len(data) >= 3  # There might be other items from previous tests
     
     # Test active_only filter
-    response = await client.get("/api/v1/items/?active_only=true")
+    response = client.get("/api/v1/items/?active_only=true")
     assert response.status_code == 200
-    data = response.json()
+    data = response.get_json()
     
     # All returned items should be active
     for item in data:
@@ -166,7 +166,7 @@ async def test_list_items(client: AsyncClient, test_db: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_items(client: AsyncClient, test_db: AsyncSession) -> None:
+async def test_search_items(client: FlaskClient, test_db: AsyncSession) -> None:
     """
     Test searching items through the API
     """
@@ -183,11 +183,11 @@ async def test_search_items(client: AsyncClient, test_db: AsyncSession) -> None:
     await test_db.commit()
     
     # Search for "special" which should match 2 items
-    response = await client.get("/api/v1/items/search/?q=special")
+    response = client.get("/api/v1/items/search/?q=special")
     
     # Check response
     assert response.status_code == 200
-    data = response.json()
+    data = response.get_json()
     assert len(data) == 2
     
     # Verify item names

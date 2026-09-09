@@ -1,3 +1,3 @@
 """
-FastAPI-Ignite FastAPI Boilerplate  - A FastAPI boilerplate application
+FastAPI-Ignite Flask Boilerplate  - A Flask boilerplate application
 """

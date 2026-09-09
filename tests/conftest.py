@@ -7,17 +7,16 @@ from typing import AsyncGenerator, Generator
 
 import pytest
 import pytest_asyncio
-from asgi_lifespan import LifespanManager
-from fastapi import FastAPI
-from httpx import AsyncClient
+from flask import Flask
+from flask.testing import FlaskClient
 from sqlalchemy.ext.asyncio import (
     AsyncSession, async_sessionmaker, create_async_engine
 )
 
+from main import create_application
 from src.core.config import settings
 from src.db.base import Base
-from src.db.session import get_db
-from src.main import create_application
+from src.db.session import set_session_factory_override
 
 
 # Set test environment
@@ -34,14 +33,13 @@ def event_loop() -> Generator:
     loop.close()
 
 
-@pytest_asyncio.fixture(scope="session")
-async def test_app() -> AsyncGenerator[FastAPI, None]:
+@pytest.fixture(scope="session")
+def test_app() -> Generator[Flask, None, None]:
     """
-    Create a FastAPI test application.
+    Create a Flask test application.
     """
     app = create_application()
-    async with LifespanManager(app):
-        yield app
+    yield app
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -50,7 +48,7 @@ async def test_db_engine():
     Create a test database engine.
     """
     # Create a new test database URL
-    TEST_DATABASE_URL = settings.DATABASE_URI.replace(
+    TEST_DATABASE_URL = str(settings.DATABASE_URI).replace(
         f"/{settings.POSTGRES_DB}", "/test_db"
     )
     
@@ -73,7 +71,7 @@ async def test_db_engine():
 
 
 @pytest_asyncio.fixture
-async def test_db(test_app: FastAPI, test_db_engine) -> AsyncGenerator[AsyncSession, None]:
+async def test_db(test_app: Flask, test_db_engine) -> AsyncGenerator[AsyncSession, None]:
     """
     Create a new database session for a test.
     """
@@ -88,23 +86,20 @@ async def test_db(test_app: FastAPI, test_db_engine) -> AsyncGenerator[AsyncSess
     
     # Create a session
     async with test_session_factory() as session:
-        # Override the get_db dependency
-        test_app.dependency_overrides[get_db] = lambda: test_session_factory()
+        # Override the session factory backing get_db
+        set_session_factory_override(test_session_factory)
         
         yield session
     
     # Rollback the transaction
+    set_session_factory_override(None)
     await transaction.rollback()
     await connection.close()
 
 
-@pytest_asyncio.fixture
-async def client(test_app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+@pytest.fixture
+def client(test_app: Flask) -> Generator[FlaskClient, None, None]:
     """
-    Create an async HTTP client for testing.
+    Create an HTTP client for testing.
     """
-    async with AsyncClient(
-        app=test_app,
-        base_url="http://test",
-    ) as client:
-        yield client
+    yield test_app.test_client()
