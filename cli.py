@@ -69,19 +69,21 @@ def run_api(args):
     """
     Run the API server
     """
-    import uvicorn
-    
     # Set environment variable for scheduler if specified
     if args.scheduler_enabled is not None:
         os.environ["SCHEDULER_ENABLED"] = str(args.scheduler_enabled).lower()
     
-    uvicorn.run(
-        "main:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-        log_level="debug" if args.reload else "info",
-    )
+    if args.reload:
+        os.environ["LOG_LEVEL"] = "DEBUG"
+    
+    from main import app
+    from src.core.server import serve
+    
+    if args.reload:
+        # Flask's development server restarts the process when the code changes
+        app.run(host=args.host, port=args.port, use_reloader=True)
+    else:
+        serve(app, host=args.host, port=args.port)
 
 
 def run_worker(args):

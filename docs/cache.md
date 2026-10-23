@@ -48,19 +48,21 @@ async def update_user(user_id: int, data: dict):
     return updated_user
 ```
 
-### Using Cache Directly in FastAPI Endpoints
+### Using Cache Directly in Flask Views
 
 ```python
-from fastapi import APIRouter, Depends
-from src.cache import CacheBackend, get_cache
+from flask import Blueprint
+from src.cache import get_cache
+from src.core.aio import run_async
 
-router = APIRouter()
+router = Blueprint("items", __name__)
 
-@router.get("/items/{item_id}")
-async def get_item(item_id: int, cache: CacheBackend = Depends(get_cache)):
+@router.get("/items/<int:item_id>")
+def get_item(item_id: int):
+    cache = run_async(get_cache().__anext__())
     # Try to get from cache
     cache_key = f"item:{item_id}"
-    cached_item = await cache.get(cache_key)
+    cached_item = run_async(cache.get(cache_key))
     
     if cached_item:
         return json.loads(cached_item)
@@ -69,7 +71,7 @@ async def get_item(item_id: int, cache: CacheBackend = Depends(get_cache)):
     item = await item_service.get_item(item_id)
     
     # Store in cache
-    await cache.set(cache_key, json.dumps(item), ex=300)
+    run_async(cache.set(cache_key, json.dumps(item), ex=300))
     
     return item
 ```

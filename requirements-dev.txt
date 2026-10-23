@@ -5,7 +5,6 @@
 pytest==8.3.5
 pytest-asyncio==0.26.0
 pytest-cov==6.1.1
-asgi-lifespan==2.1.0
 
 # Linting and formatting
 black==25.1.0

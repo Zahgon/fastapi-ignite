@@ -75,15 +75,13 @@ async def update_user(user_id: int, data: dict):
 ```python
 from src.cache import CacheBackend, get_cache
 
-@router.get("/items/{item_id}")
-async def get_item(
-    item_id: int, 
-    cache: CacheBackend = Depends(get_cache)
-):
+@router.get("/items/<int:item_id>")
+def get_item(item_id: int):
+    cache: CacheBackend = run_async(get_cache().__anext__())
     cache_key = f"item:{item_id}"
     
     # Try to get from cache
-    cached_value = await cache.get(cache_key)
+    cached_value = run_async(cache.get(cache_key))
     if cached_value:
         return json.loads(cached_value)
         

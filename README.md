@@ -15,7 +15,7 @@
 
 ## Core Technologies
 
-- **FastAPI**: High-performance async web framework for building APIs
+- **Flask**: Lightweight WSGI web framework, with the async data and cache layers driven from a background event loop
 - **SQLAlchemy**: SQL toolkit and ORM with async support
 - **Pydantic v2**: Data validation and settings management using Python type hints
 - **PostgreSQL**: Powerful open-source relational database

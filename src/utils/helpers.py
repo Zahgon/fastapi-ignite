@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Union
 
-from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel
 
 
 def serialize_datetime(dt: datetime) -> str:
@@ -31,6 +31,31 @@ def parse_json_string(json_str: str) -> Dict:
         return json.loads(json_str)
     except json.JSONDecodeError:
         return {}
+
+
+def jsonable_encoder(value: Any) -> Any:
+    """
+    Convert a value, including Pydantic and SQLAlchemy models, into JSON-compatible
+    primitives
+    """
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {key: jsonable_encoder(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [jsonable_encoder(item) for item in value]
+    if hasattr(value, "__dict__"):
+        return {
+            key: jsonable_encoder(item)
+            for key, item in vars(value).items()
+            if not key.startswith("_")
+        }
+
+    return value
 
 
 def model_to_dict(model: Any) -> Dict:

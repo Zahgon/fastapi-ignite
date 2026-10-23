@@ -20,7 +20,7 @@ This document provides guidance for developers working on FastAPI-Ignite Boilerp
 
 FastAPI-Ignite FastAPI Boilerplate  is built with a clean architecture design that separates concerns into distinct layers:
 
-1. **API Layer**: Handles HTTP requests/responses using FastAPI
+1. **API Layer**: Handles HTTP requests/responses using Flask blueprints
 2. **Service Layer**: Contains business logic
 3. **Repository Layer**: Handles data access through SQLAlchemy
 4. **Domain Layer**: Core business entities and logic
@@ -235,15 +235,18 @@ We use Alembic for database migrations:
 
 3. **Add an API endpoint** in `src/api/v1/endpoints/`:
    ```python
-   @router.post("/", response_model=ItemResponse)
-   async def create_item(item_data: ItemCreate, db: AsyncSession = Depends(get_db_session)):
-       return await ItemService.create_item(db, item_data)
+   @router.post("/")
+   def create_item():
+       item_data = validate_body(ItemCreate, request.get_data(), request.headers.get("Content-Type"))
+       with db_session() as db:
+           item = run_async(ItemService.create_item(db, item_data))
+           return model_response(ItemResponse, item, status=201)
    ```
 
 4. **Register the router** in `src/api/v1/router.py`:
    ```python
    from src.api.v1.endpoints import your_endpoint
-   router.include_router(your_endpoint.router)
+   router.register_blueprint(your_endpoint.router)
    ```
 
 ### API Versioning
@@ -251,12 +254,12 @@ We use Alembic for database migrations:
 Each API version has its own directory (`v1`, `v2`, etc.) with separate routers and endpoints. This allows for multiple API versions to coexist.
 
 ### API Documentation
-FastAPI automatically exposes interactive docs for every version:
+The application serves interactive docs for every version:
 - **Swagger UI**: `http://<host>:<port>{{settings.API_PREFIX}}/docs` (e.g. `http://localhost:8000/api/docs`)
 - **ReDoc**: `http://<host>:<port>{{settings.API_PREFIX}}/redoc` (e.g. `http://localhost:8000/api/redoc`)
 - **OpenAPI schema JSON**: `http://<host>:<port>{{settings.API_PREFIX}}/openapi.json`
 
-These paths come from the `docs_url`, `redoc_url`, and `openapi_url` parameters in `create_application()` (see `main.py`).
+These routes are registered by `register_documentation()` in `main.py`; the schema itself is built by `src/api/openapi.py`.
 
 ## Background Tasks
 
@@ -428,16 +431,17 @@ async def update_user(user_id: str, data: Dict) -> Dict:
 #### 3. Direct Cache Access in Endpoints
 
 ```python
-from src.cache import CacheBackend, get_cache
-from fastapi import Depends
+from src.cache import get_cache
+from src.core.aio import run_async
 
-@router.get("/items/{item_id}")
-async def get_item(item_id: str, cache: CacheBackend = Depends(get_cache)):
+@router.get("/items/<item_id>")
+def get_item(item_id: str):
+    cache = run_async(get_cache().__anext__())
     # Manual cache handling gives you more control
     cache_key = f"item:{item_id}"
     
     # Try to get from cache first
-    cached_item = await cache.get(cache_key)
+    cached_item = run_async(cache.get(cache_key))
     if cached_item:
         return json.loads(cached_item)
     
@@ -503,7 +507,7 @@ async def test_create_item(client: AsyncClient):
 ## Docker Development
 
 In the root `Dockerfile` we define two build stages:
-1. **production** (aliased `production`) uses the base image and sets a `CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]` without reload.  Build it with:
+1. **production** (aliased `production`) uses the base image and sets a `CMD ["python", "cli.py", "api", "--host", "0.0.0.0", "--port", "8000"]` without reload.  Build it with:
    ```cmd
    docker build --target production -t rankyx:prod .
    ```

@@ -36,7 +36,7 @@ RUN addgroup --system app && \
 USER app
 
 # Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "cli.py", "api", "--host", "0.0.0.0", "--port", "8000"]
 
 # Development stage
 FROM base as development
@@ -49,4 +49,4 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY . .
 
 # Run the application with hot reload
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["python", "cli.py", "api", "--host", "0.0.0.0", "--port", "8000", "--reload"]

@@ -8,8 +8,6 @@ import json
 import logging
 from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 
-from fastapi import Depends, Request
-
 from src.cache.backends.base import CacheBackend
 from src.cache.backends.factory import get_cache_backend
 from src.cache.dependencies import get_cache
@@ -70,7 +68,7 @@ def cached(
             bound_args = sig.bind(*args, **kwargs)
             bound_args.apply_defaults()
             arg_dict = {k: v for k, v in bound_args.arguments.items() 
-                        if k not in exclude_keys and not isinstance(v, (CacheBackend, Request))}
+                        if k not in exclude_keys and not isinstance(v, CacheBackend)}
             
             # Generate the cache key
             if key_builder:
